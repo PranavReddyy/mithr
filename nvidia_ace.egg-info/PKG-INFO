@@ -1,0 +1,11 @@
+Metadata-Version: 2.4
+Name: nvidia-ace
+Version: 1.2.0
+Author: nvidia
+Requires-Dist: PyYAML==6.0.1
+Requires-Dist: grpclib==0.4.7
+Requires-Dist: googleapis-common-protos==1.60.0
+Requires-Dist: protobuf==4.24.1
+Requires-Dist: protobuf-gen==0.0.4
+Dynamic: author
+Dynamic: requires-dist

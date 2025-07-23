@@ -1,14 +1,24 @@
 from typing_extensions import TypedDict
+from typing import Optional, List, Dict, Any
 
 
 class State(TypedDict):
-    name: str
-    service_type: str
-    check_in: dict
-    ticket_booking: dict
-    amount: float
-    history: list[dict]
+    # User information
+    name: Optional[str]
+    
+    # Conversation flow
+    current_node: Optional[str]
+    next_question: Optional[str]
+    last_query: Optional[str]
+    
+    # Session management
+    session_id: Optional[str]
+    history: List[Dict[str, Any]]
     retry_count: int
-    current_node: str
-    next_question: str
-    session_id: str
+    
+    # University assistant specific
+    conversation_ended: bool
+    
+    # Optional fields for extension
+    user_context: Optional[Dict[str, Any]]  # For storing additional user context
+    rag_context: Optional[Dict[str, Any]]   # For RAG-specific context

@@ -1,92 +1,76 @@
 import os
+from dotenv import load_dotenv
 from langgraph.graph import StateGraph, START, END
-from langchain_openai import ChatOpenAI
-from langsmith import traceable
 from functools import partial
 
+# Load environment variables
+load_dotenv()
+
 from nodes.routes import (
-    service_choice_router,
     collect_name_router,
-    check_in_booking_router,
-    check_in_passport_router,
-    seat_preference_router,
-    booking_router, luggage_router
+    university_chat_router,
+    goodbye_router
 )
 from models.userstate import State
 from nodes.node_functions import (
-    collect_name, service_choice, 
-    check_in_booking, check_in_passport, 
-    seat_preference, book_ticket
-)
-# from misc.visualise import generate_mermaid_code, visualize_workflow
-
-
-os.environ["LANGCHAIN_PROJECT"] = "MITHR"
-
-
-llm = ChatOpenAI(
-    model="Qwen/Qwen2-VL-7B-Instruct",
-    openai_api_key="EMPTY",
-    openai_api_base="http://10.45.100.6:8000/v1",
-    max_tokens=128,
-    temperature=0.1,
+    collect_name,
+    university_chat,
+    goodbye
 )
 
-def general_query(llm, state):
-    return state
+# Set up project name
+os.environ["LANGCHAIN_PROJECT"] = "UNIVERSITY_ASSISTANT"
 
+# NO LLM NEEDED - Using RAG only
+llm = None  # We don't need this
 
-def luggage_checkin(llm, state):
-    print("Luggage check-in")
-    return state
-
-
-def payment_gateway(llm, state):
-    return state
-
-
+# Create the simplified university assistant workflow
 workflow = StateGraph(State)
+
+# Add nodes for university assistant (pass None for llm)
 workflow.add_node("collect_name", partial(collect_name, llm))
-workflow.add_node("service_choice", partial(service_choice, llm))
-workflow.add_node("check_in_booking_node", partial(check_in_booking, llm))
-workflow.add_node("check_in_passport_node", partial(check_in_passport, llm))
-workflow.add_node("seat_preference_node", partial(seat_preference, llm))
-workflow.add_node("luggage_checkin_node", partial(luggage_checkin, llm))
-workflow.add_node("book_ticket_node", partial(book_ticket, llm))
-workflow.add_node("payment_gateway_node", partial(payment_gateway, llm))
-workflow.add_node("general_query_node", partial(general_query, llm))
+workflow.add_node("university_chat", partial(university_chat, llm))
+workflow.add_node("goodbye", partial(goodbye, llm))
+
+# Set entry point
 workflow.set_entry_point("collect_name")
 
+# Add edges for simple conversation flow
 workflow.add_edge(START, "collect_name")
-workflow.add_conditional_edges("collect_name", collect_name_router, ["collect_name", "service_choice"])
-workflow.add_conditional_edges("service_choice", service_choice_router,
-                               ["service_choice", "check_in_booking_node", "book_ticket_node", "general_query_node"])
-workflow.add_conditional_edges("check_in_booking_node", check_in_booking_router, ["check_in_booking_node", "check_in_passport_node", END])
-workflow.add_conditional_edges("check_in_passport_node", check_in_passport_router, ["check_in_passport_node", "seat_preference_node"])
-workflow.add_conditional_edges("seat_preference_node", seat_preference_router, ["seat_preference_node", "luggage_checkin_node"])
-workflow.add_edge("luggage_checkin_node", "payment_gateway_node")
-workflow.add_conditional_edges("book_ticket_node", booking_router, ["book_ticket_node", "check_in_passport_node"])
-workflow.add_conditional_edges("luggage_checkin_node", luggage_router, ["payment_gateway_node", "luggage_checkin_node"])
-workflow.add_edge("payment_gateway_node", "general_query_node")
+workflow.add_conditional_edges("collect_name", collect_name_router, ["collect_name", "university_chat"])
+workflow.add_conditional_edges("university_chat", university_chat_router, ["university_chat", "goodbye"])
+workflow.add_edge("goodbye", END)
 
+# Compile the workflow
 compiled_workflow = workflow.compile()
-compiled_workflow.get_graph().draw_png("workflow_graph.png")
 
-state = State(
-    name=None,
-    service_type=None,
-    check_in={},
-    ticket_booking={},
-    amount=0,
-    history=[],
-    retry_count=0
-)
-compiled_workflow.get_graph().draw_png("workflow_graph.png")
+# Generate workflow visualization
+try:
+    compiled_workflow.get_graph().draw_png("university_workflow_graph.png")
+    print("Workflow graph saved as 'university_workflow_graph.png'")
+except Exception as e:
+    print(f"Could not generate workflow graph: {e}")
 
+# Initialize state for university assistant
+def create_initial_state():
+    """Create initial state for university assistant."""
+    return State(
+        name=None,
+        history=[],
+        retry_count=0,
+        current_node="collect_name",
+        next_question=None,
+        session_id=None,
+        last_query=None,
+        conversation_ended=False
+    )
 
-@traceable(run_type="chain", name="BookingWorkflow")
 def run_workflow(state):
+    """Run the university assistant workflow."""
     return compiled_workflow.invoke(state)
 
-
-run_workflow(state)
+# Test the workflow if run directly
+if __name__ == "__main__":
+    print("🎓 University Assistant Workflow Initialized")
+    print("Available nodes:", ["collect_name", "university_chat", "goodbye"])
+    print("Using RAG endpoint:", os.getenv("UNIVERSITY_RAG_ENDPOINT", "Not configured"))

@@ -1,15 +1,54 @@
-uvicorn==0.34.3
-fastapi==0.115.13
-langchain==0.3.26
-langchain-openai==0.3.24
-langgraph==0.4.8
-elevenlabs==2.4.0
-pydub==0.25.1
-numpy==1.26.4
-scipy==1.13.0
-grpcio==1.64.0
-protobuf==4.24.1
-PyYAML==6.0.1
-pandas==2.2.2
-torch==2.7.1
-torchaudio==2.7.1
+# FastAPI and web framework
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Text-to-Speech and Audio (Python 3.13 compatible)
+elevenlabs
+openai-whisper
+sounddevice
+soundfile
+librosa
+numpy
+scipy
+
+# Audio processing alternatives (Python 3.13 compatible)
+mutagen
+audioread
+
+# PyTorch for Whisper and VAD
+torch
+torchaudio
+
+# NVIDIA ACE and A2F (Critical missing dependencies)
+nvidia-ace
+grpcio
+grpcio-tools
+protobuf
+
+# HTTP requests and async
+requests
+aiohttp
+httpx
+
+# Data processing
+pandas
+pyyaml
+
+# Development tools
+python-dotenv
+langchain-core
+typing-extensions
+
+# Visualization (optional)
+matplotlib
+networkx
+
+
+
+protobuf-gen
+PyYAML
+grpclib
+googleapis-common-protos
+protobuf
+protobuf-gen
