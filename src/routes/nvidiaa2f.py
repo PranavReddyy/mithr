@@ -7,12 +7,24 @@ from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse
 from elevenlabs.client import ElevenLabs
+from pydantic import BaseModel
 # Remove pydub import - replace with numpy/scipy
 # from pydub import AudioSegment
 import numpy as np
 from scipy.io import wavfile
 import soundfile as sf
 import wave
+
+# Add Pydantic models for request bodies
+class TTSRequest(BaseModel):
+    text: str
+    voice_id: str = "cgSgspJ2msm6clMCkdW9"
+
+class A2FRequest(BaseModel):
+    text: str
+    function_id: str = "0961a6da-fb9e-4f2e-8491-247e5fd7bf8d"
+    uri: str = "grpc.nvcf.nvidia.com:443"
+    config_file: str = "a2f/config/config_claire.yml"
 
 # Try to import NVIDIA ACE components with proper error handling
 try:
@@ -176,15 +188,18 @@ async def a2f_status():
 
 @a2f_router.post("/text2animation")
 async def process_audio_to_animation(
-    text: str,
-    function_id: str = "0961a6da-fb9e-4f2e-8491-247e5fd7bf8d",
-    uri: str = "grpc.nvcf.nvidia.com:443",
-    config_file: str = "a2f/config/config_claire.yml",
+    request: A2FRequest,
     background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
     """
     Process text to 3D face animation using ElevenLabs TTS + NVIDIA A2F
     """
+    # Extract parameters from request body
+    text = request.text
+    function_id = request.function_id
+    uri = request.uri
+    config_file = request.config_file
+    
     # Check prerequisites
     if not client:
         raise HTTPException(
@@ -286,13 +301,16 @@ async def process_audio_to_animation(
 
 @a2f_router.post("/tts-only")
 async def text_to_speech_only(
-    text: str,
-    voice_id: str = "cgSgspJ2msm6clMCkdW9",
+    request: TTSRequest,
     background_tasks: BackgroundTasks = BackgroundTasks()
 ):
     """
     Text-to-speech only (without A2F animation) for testing
     """
+    # Extract parameters from request body
+    text = request.text
+    voice_id = request.voice_id
+    
     if not client:
         raise HTTPException(
             status_code=503,
