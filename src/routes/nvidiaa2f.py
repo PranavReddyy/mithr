@@ -1,270 +1,352 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+import shutil
+import io
 import os
-import uuid
-from dotenv import load_dotenv
+import asyncio
+import time
+from uuid import uuid4
+from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi.responses import FileResponse
+from elevenlabs.client import ElevenLabs
+# Remove pydub import - replace with numpy/scipy
+# from pydub import AudioSegment
+import numpy as np
+from scipy.io import wavfile
+import soundfile as sf
+import wave
 
-# Load environment variables
-load_dotenv()
+# Try to import NVIDIA ACE components with proper error handling
+try:
+    from nvidia_ace.services.a2f_controller.v1_pb2_grpc import A2FControllerServiceStub
+    NVIDIA_ACE_AVAILABLE = True
+    print("✅ NVIDIA ACE A2F Controller imported successfully")
+except ImportError as e:
+    print(f"⚠️  NVIDIA ACE A2F Controller import failed: {e}")
+    NVIDIA_ACE_AVAILABLE = False
 
-from models.userstate import State
-from models.chatmodel import ChatModel
-from session_store import create_session, get_session, update_session, delete_session, get_all_sessions
-from utils.executor import execute_node
-from routes.nvidiaa2f import a2f_router
-from utils.rag_client import rag_client
-
-# Create FastAPI app
-app = FastAPI(
-    title="University Assistant API",
-    description="3D Conversational University Assistant with RAG integration",
-    version="1.0.0"
-)
-
-# Include A2F router for 3D face animation
-app.include_router(a2f_router, tags=["a2f"])
-
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Create templates directory and mount static files
-os.makedirs("templates", exist_ok=True)
-app.mount("/static", StaticFiles(directory="templates"), name="static")
-
-
-@app.get("/")
-async def root():
-    """Serve the main web interface."""
-    return FileResponse("templates/index.html")
-
-
-@app.get("/api/")
-async def api_info():
-    """Root API endpoint with information."""
-    return {
-        "message": "University Assistant API",
-        "version": "1.0.0",
-        "rag_endpoint": rag_client.rag_endpoint,
-        "interfaces": {
-            "web_interface": "/",
-            "api_docs": "/docs",
-            "session_init": "/session/",
-            "chat": "/chat/",
-            "health": "/health/",
-            "a2f": "/a2f/"
-        }
-    }
-
-
-@app.get("/health/")
-async def health_check():
-    """Health check endpoint."""
-    rag_healthy = rag_client.health_check()
-    return {
-        "status": "healthy",
-        "rag_system": "connected" if rag_healthy else "disconnected",
-        "a2f": "available",
-        "components": {
-            "fastapi": "running",
-            "rag_client": "connected" if rag_healthy else "disconnected",
-            "session_store": "active",
-            "web_interface": "available"
-        }
-    }
-
-
-@app.get("/session/")
-async def init_session():
-    """Initialize a new conversation session."""
+# Try different possible import paths for A2F client
+A2F_CLIENT_AVAILABLE = False
+try:
+    # Try the original import path first
+    import a2f.a2f_3d.client.auth as a2f_3d_auth
+    import a2f.a2f_3d.client.service as a2f_3d_service
+    A2F_CLIENT_AVAILABLE = True
+    print("✅ A2F 3D client imported successfully (original path)")
+except ImportError:
     try:
-        # Create initial state for university assistant
-        state = State(
-            name=None,
-            history=[],
-            retry_count=0,
-            current_node="collect_name",
-            next_question=None,
-            session_id=None,
-            last_query=None,
-            conversation_ended=False
+        # Try alternative import path
+        from nvidia_ace.a2f_3d.client import auth as a2f_3d_auth
+        from nvidia_ace.a2f_3d.client import service as a2f_3d_service
+        A2F_CLIENT_AVAILABLE = True
+        print("✅ A2F 3D client imported successfully (nvidia_ace path)")
+    except ImportError:
+        try:
+            # Try direct nvidia_ace client path
+            from nvidia_ace.client import auth as a2f_3d_auth
+            from nvidia_ace.client import service as a2f_3d_service
+            A2F_CLIENT_AVAILABLE = True
+            print("✅ A2F 3D client imported successfully (direct client path)")
+        except ImportError:
+            print("⚠️  A2F 3D client not available - creating mock implementations")
+            
+            # Create minimal mock implementations to prevent crashes
+            class MockAuth:
+                @staticmethod
+                def create_channel(uri, use_ssl=True, metadata=None):
+                    print(f"🎭 Mock: Creating channel to {uri}")
+                    return MockChannel()
+            
+            class MockService:
+                @staticmethod
+                async def write_to_stream(stream, config_file, data=None, samplerate=24000):
+                    print(f"🎭 Mock: Writing {len(data)} samples at {samplerate}Hz")
+                    await asyncio.sleep(0.1)  # Simulate processing
+                
+                @staticmethod
+                async def read_from_stream(stream):
+                    print("🎭 Mock: Reading animation data")
+                    await asyncio.sleep(1)  # Simulate processing
+                    return None  # Mock will return None to trigger error handling
+
+            class MockChannel:
+                pass
+            
+            a2f_3d_auth = MockAuth()
+            a2f_3d_service = MockService()
+            A2F_CLIENT_AVAILABLE = False
+
+a2f_router = APIRouter(prefix='/a2f')
+
+# ElevenLabs setup with better error handling
+elabs_key = os.getenv("ELEVENLABS_API_KEY")
+if elabs_key is None:
+    print("⚠️  ELEVENLABS_API_KEY not set. TTS features will be limited.")
+    client = None
+else:
+    try:
+        client = ElevenLabs(api_key=elabs_key)
+        print("✅ ElevenLabs client initialized successfully")
+    except Exception as e:
+        print(f"❌ ElevenLabs client initialization failed: {e}")
+        client = None
+
+
+def cleanup_files(*paths):
+    """Clean up temporary files"""
+    def cleanup():
+        time.sleep(2)
+        for path in paths:
+            try:
+                if os.path.exists(path):
+                    if os.path.isdir(path):
+                        shutil.rmtree(path)
+                        print(f"🗑️  Cleaned up directory: {path}")
+                    elif os.path.isfile(path):
+                        os.remove(path)
+                        print(f"🗑️  Cleaned up file: {path}")
+            except Exception as e:
+                print(f"Error cleaning up {path}: {e}")
+    return cleanup
+
+
+def optimize_audio_collection_and_export(audio_stream, rate=24000):
+    """
+    Optimized audio collection using numpy instead of pydub
+    """
+    # First pass: collect chunks and calculate total size
+    chunks = []
+    total_size = 0
+
+    for chunk in audio_stream:
+        chunks.append(chunk)
+        total_size += len(chunk)
+
+    if total_size == 0:
+        return rate, np.array([], dtype=np.int16)
+
+    # Pre-allocate buffer with exact size needed
+    buffer = bytearray(total_size)
+
+    # Second pass: copy chunks directly into buffer
+    offset = 0
+    for chunk in chunks:
+        chunk_len = len(chunk)
+        buffer[offset:offset + chunk_len] = chunk
+        offset += chunk_len
+
+    # Convert directly to numpy array
+    audio_array = np.frombuffer(buffer, dtype=np.int16)
+    return rate, audio_array
+
+
+def convert_audio_format(audio_data, sample_rate, target_format="wav"):
+    """
+    Convert audio data to different formats using soundfile instead of pydub
+    """
+    try:
+        # Convert to float32 for processing
+        if audio_data.dtype == np.int16:
+            audio_float = audio_data.astype(np.float32) / 32767.0
+        else:
+            audio_float = audio_data.astype(np.float32)
+        
+        # Create temporary file
+        temp_file = f"temp_audio_{uuid4().hex}.{target_format}"
+        
+        # Write using soundfile
+        sf.write(temp_file, audio_float, sample_rate)
+        
+        return temp_file
+    except Exception as e:
+        print(f"Audio conversion error: {e}")
+        return None
+
+
+@a2f_router.get("/status")
+async def a2f_status():
+    """Get detailed A2F system status"""
+    return {
+        "nvidia_ace_controller": NVIDIA_ACE_AVAILABLE,
+        "a2f_client": A2F_CLIENT_AVAILABLE,
+        "elevenlabs": client is not None,
+        "nvidia_api_key": os.getenv("NVIDIA_API_KEY") is not None,
+        "ready": NVIDIA_ACE_AVAILABLE and A2F_CLIENT_AVAILABLE and client is not None and os.getenv("NVIDIA_API_KEY") is not None,
+        "mode": "real" if (NVIDIA_ACE_AVAILABLE and A2F_CLIENT_AVAILABLE) else "mock"
+    }
+
+
+@a2f_router.post("/text2animation")
+async def process_audio_to_animation(
+    text: str,
+    function_id: str = "0961a6da-fb9e-4f2e-8491-247e5fd7bf8d",
+    uri: str = "grpc.nvcf.nvidia.com:443",
+    config_file: str = "a2f/config/config_claire.yml",
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+):
+    """
+    Process text to 3D face animation using ElevenLabs TTS + NVIDIA A2F
+    """
+    # Check prerequisites
+    if not client:
+        raise HTTPException(
+            status_code=503,
+            detail="ElevenLabs TTS not available. Please configure ELEVENLABS_API_KEY."
+        )
+    
+    if not NVIDIA_ACE_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="NVIDIA ACE not available. Please install nvidia-ace package."
+        )
+    
+    if not A2F_CLIENT_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="A2F client not available. Running in mock mode - no animation will be generated."
+        )
+    
+    if not os.getenv("NVIDIA_API_KEY"):
+        raise HTTPException(
+            status_code=503,
+            detail="NVIDIA API key not configured. Please set NVIDIA_API_KEY environment variable."
+        )
+    
+    try:
+        print(f"🎬 Processing text to animation: {text[:50]}...")
+        
+        # Generate audio using ElevenLabs
+        start_time = time.perf_counter()
+        audio_stream = client.text_to_speech.stream(
+            text=text,
+            voice_id="cgSgspJ2msm6clMCkdW9",  # University-appropriate voice
+            model_id="eleven_multilingual_v2",
+            output_format="pcm_24000",
+        )
+        audio_gen_time = time.perf_counter() - start_time
+        print(f"🎤 Audio generation: {audio_gen_time:.3f}s")
+
+        # Collect and process audio
+        start_time = time.perf_counter()
+        rate, data = optimize_audio_collection_and_export(audio_stream)
+        audio_proc_time = time.perf_counter() - start_time
+        print(f"🎵 Audio processing: {audio_proc_time:.3f}s ({len(data)} samples)")
+
+        # Create gRPC channel for A2F
+        start_time = time.perf_counter()
+        metadata_args = [("function-id", function_id), ("authorization", "Bearer " + os.getenv("NVIDIA_API_KEY", ""))]
+        channel = a2f_3d_auth.create_channel(uri=uri, use_ssl=True, metadata=metadata_args)
+        stub = A2FControllerServiceStub(channel)
+        channel_time = time.perf_counter() - start_time
+        print(f"🔗 Channel creation: {channel_time:.3f}s")
+
+        # Process audio through A2F
+        start_time = time.perf_counter()
+        stream = stub.ProcessAudioStream()
+        write = asyncio.create_task(a2f_3d_service.write_to_stream(stream, config_file, data=data, samplerate=rate))
+        read = asyncio.create_task(a2f_3d_service.read_from_stream(stream))
+
+        await write
+        await read
+        a2f_proc_time = time.perf_counter() - start_time
+        print(f"🎬 A2F processing: {a2f_proc_time:.3f}s")
+
+        # Get results and create zip
+        path = read.result()
+        if path:
+            # Create zip with unique name
+            zip_name = f"university_animation_{uuid4().hex[:8]}"
+            zip_path = shutil.make_archive(zip_name, 'zip', path)
+            
+            if not os.path.exists(zip_path) or os.path.getsize(zip_path) == 0:
+                raise HTTPException(status_code=500, detail="Failed to create zip archive.")
+            
+            total_time = audio_gen_time + audio_proc_time + channel_time + a2f_proc_time
+            print(f"✅ Animation complete: {os.path.basename(zip_path)} ({os.path.getsize(zip_path)} bytes, {total_time:.3f}s total)")
+            
+            background_tasks.add_task(cleanup_files(zip_path, path))
+            return FileResponse(
+                zip_path,
+                media_type='application/zip',
+                filename=os.path.basename(zip_path),
+                headers={
+                    "X-Processing-Time": f"{total_time:.3f}s",
+                    "X-Audio-Samples": str(len(data))
+                }
+            )
+        else:
+            raise HTTPException(status_code=500, detail="A2F processing failed - no output generated")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error in text2animation: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Animation processing failed: {str(e)}")
+
+
+@a2f_router.post("/tts-only")
+async def text_to_speech_only(
+    text: str,
+    voice_id: str = "cgSgspJ2msm6clMCkdW9",
+    background_tasks: BackgroundTasks = BackgroundTasks()
+):
+    """
+    Text-to-speech only (without A2F animation) for testing
+    """
+    if not client:
+        raise HTTPException(
+            status_code=503,
+            detail="ElevenLabs TTS not available. Please configure ELEVENLABS_API_KEY."
+        )
+    
+    try:
+        print(f"🎤 Generating TTS for: {text[:50]}...")
+        
+        # Generate audio using ElevenLabs
+        audio_stream = client.text_to_speech.stream(
+            text=text,
+            voice_id=voice_id,
+            model_id="eleven_multilingual_v2",
+            output_format="mp3_44100_128",
         )
         
-        # Execute the collect_name node to get initial greeting (NO LLM)
-        state = execute_node("collect_name", None, state)  # Pass None for llm
+        # Collect audio data
+        audio_data = b""
+        for chunk in audio_stream:
+            audio_data += chunk
         
-        # Create session and store state
-        session_id = create_session(state)
-        state["session_id"] = str(session_id)
-        update_session(session_id, state)
+        # Save to temporary file with unique name
+        temp_file = f"university_tts_{uuid4().hex[:8]}.mp3"
+        with open(temp_file, 'wb') as f:
+            f.write(audio_data)
         
-        return {
-            "session_id": str(session_id),
-            "state": state,
-            "message": "University assistant session initialized successfully"
-        }
+        print(f"✅ TTS generated: {temp_file} ({len(audio_data)} bytes)")
         
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to initialize session: {str(e)}")
-
-
-@app.post("/chat/")
-async def chat(chat_model: ChatModel):
-    """Handle chat interaction with the university assistant."""
-    try:
-        session_id = chat_model["session_id"]
-        user_input = chat_model["user_input"]
+        background_tasks.add_task(cleanup_files(temp_file))
         
-        # Get session
-        session = get_session(session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
-
-        state = session
-        
-        # Get current node or default to university_chat
-        current_node = state.get("current_node", "university_chat")
-        
-        # If conversation ended, don't process further
-        if state.get("conversation_ended", False):
-            return {
-                "session_id": session_id,
-                "state": state,
-                "message": "Conversation has ended. Please start a new session."
+        return FileResponse(
+            temp_file,
+            media_type='audio/mpeg',
+            filename=os.path.basename(temp_file),
+            headers={
+                "X-Audio-Length": str(len(audio_data))
             }
-        
-        # Execute current node with user input (NO LLM)
-        state = execute_node(current_node, None, state, user_input)  # Pass None for llm
-        
-        # Get next node and execute if different
-        next_node = state.get("current_node")
-        if next_node and next_node != current_node:
-            state = execute_node(next_node, None, state)  # Pass None for llm
-        
-        # Update session
-        update_session(session_id, state)
-        
-        return {
-            "session_id": session_id,
-            "state": state,
-            "message": "Response generated successfully"
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Chat processing failed: {str(e)}")
-
-
-@app.delete("/session/{session_id}")
-async def end_session(session_id: str):
-    """End a conversation session."""
-    try:
-        session = get_session(session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
-        
-        # Clear RAG context
-        rag_client.clear_session_context(session_id)
-        
-        # Delete session
-        delete_session(session_id)
-        
-        return {
-            "message": f"Session {session_id} ended successfully",
-            "session_id": session_id
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to end session: {str(e)}")
-
-
-@app.get("/get_all_sessions/")
-async def get_all_sessions_endpoint():
-    """Get all active sessions."""
-    try:
-        sessions = get_all_sessions()
-        return {
-            "total_sessions": len(sessions),
-            "sessions": sessions
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve sessions: {str(e)}")
-
-
-@app.post("/rag/test/")
-async def test_rag_endpoint(query_data: dict):
-    """Test RAG endpoint connectivity."""
-    try:
-        query = query_data.get("query", "What are the university's admission requirements?")
-        response = rag_client.query_university_info(query)
-        
-        return {
-            "query": query,
-            "response": response,
-            "status": "success"
-        }
+        )
         
     except Exception as e:
-        return {
-            "query": query_data.get("query", ""),
-            "response": f"RAG test failed: {str(e)}",
-            "status": "error"
-        }
+        print(f"❌ Error in TTS: {e}")
+        raise HTTPException(status_code=500, detail=f"TTS processing failed: {str(e)}")
 
 
-@app.get("/sessions/stats/")
-async def session_stats():
-    """Get session statistics."""
-    try:
-        sessions = get_all_sessions()
-        total_sessions = len(sessions)
-        
-        node_counts = {}
-        conversation_ended_count = 0
-        
-        for session_id, session_data in sessions.items():
-            current_node = session_data.get("current_node", "unknown")
-            node_counts[current_node] = node_counts.get(current_node, 0) + 1
-            
-            if session_data.get("conversation_ended", False):
-                conversation_ended_count += 1
-        
-        return {
-            "total_sessions": total_sessions,
-            "active_sessions": total_sessions - conversation_ended_count,
-            "ended_sessions": conversation_ended_count,
-            "sessions_by_node": node_counts,
-            "rag_system_healthy": rag_client.health_check()
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get session stats: {str(e)}")
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize application on startup."""
-    print("🎓 University Assistant API starting up...")
-    print(f"RAG endpoint: {rag_client.rag_endpoint}")
-    print("🌐 Web interface: http://127.0.0.1:8000/")
-    print("📚 API docs: http://127.0.0.1:8000/docs")
-    print("🚀 University Assistant API ready!")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown."""
-    print("🎓 University Assistant API shutting down...")
-    for session_id in get_all_sessions().keys():
-        rag_client.clear_session_context(session_id)
-    print("👋 University Assistant API stopped!")
+@a2f_router.get("/health")
+async def a2f_health_check():
+    """Health check for A2F system"""
+    return {
+        "status": "healthy",
+        "elevenlabs": "connected" if client else "not configured",
+        "nvidia_ace": "available" if NVIDIA_ACE_AVAILABLE else "not available",
+        "a2f_client": "available" if A2F_CLIENT_AVAILABLE else "not available", 
+        "nvidia_api_key": "configured" if os.getenv("NVIDIA_API_KEY") else "not configured",
+        "ready_for_animation": NVIDIA_ACE_AVAILABLE and A2F_CLIENT_AVAILABLE and client is not None and os.getenv("NVIDIA_API_KEY") is not None,
+        "ready_for_tts": client is not None
+    }
