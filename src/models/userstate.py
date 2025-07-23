@@ -15,10 +15,4 @@ class State(TypedDict):
     session_id: Optional[str]
     history: List[Dict[str, Any]]
     retry_count: int
-    
-    # University assistant specific
     conversation_ended: bool
-    
-    # Optional fields for extension
-    user_context: Optional[Dict[str, Any]]  # For storing additional user context
-    rag_context: Optional[Dict[str, Any]]   # For RAG-specific context
