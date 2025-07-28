@@ -1,121 +1,33 @@
-import json
 from utils.rag_client import rag_client
+import logging
 
-# Load mock data if needed
-try:
-    with open("conf/mock.json", "r") as file:
-        MOCK_DATA = json.load(file)
-except FileNotFoundError:
-    MOCK_DATA = {"default_response": "I'm here to help with university information."}
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-
-def collect_name(llm, state, user_input=None):
-    """Collect user's name - entry point"""
-    if user_input:
-        # User provided their name
-        state["name"] = user_input.strip()
-        state["current_node"] = "university_chat"
-        state["next_question"] = f"Nice to meet you, {state['name']}! I'm your university assistant. How can I help you today?"
-        
-        # Add to history
-        if "history" not in state:
-            state["history"] = []
-        state["history"].append({"user": user_input, "assistant": state["next_question"]})
-        
-        return state
-    else:
-        # Initial greeting
-        state["current_node"] = "collect_name"
-        state["next_question"] = "Hello! I'm your university assistant. What's your name?"
-        return state
-
-
-def university_chat(llm, state, user_input=None):
-    """Handle all university-related questions using RAG"""
-    if not user_input:
-        return state
+def direct_rag_query(user_input, session_id=None):
+    """Direct RAG query - no nodes, no routing, just RAG"""
+    logger.info(f"direct_rag_query called with user_input: '{user_input}', session_id: {session_id}")
     
-    user_input = user_input.strip().lower()
+    if not user_input or not user_input.strip():
+        logger.info("Empty user input, returning greeting")
+        return "Hello! I'm your university assistant. How can I help you today?"
     
-    # Check for goodbye intent
-    goodbye_phrases = ["bye", "goodbye", "see you", "thanks", "thank you", "exit", "quit"]
-    if any(phrase in user_input for phrase in goodbye_phrases):
-        state["current_node"] = "goodbye"
-        return state
-    
-    # Use RAG for all other questions
     try:
-        session_id = state.get("session_id", "default")
-        rag_response = rag_client.query_university_info(user_input, session_id=session_id)
+        logger.info(f"Calling rag_client.query_university_info with: '{user_input.strip()}'")
         
-        if rag_response and rag_response.strip():
-            state["next_question"] = rag_response
+        # Send directly to RAG
+        response = rag_client.query_university_info(user_input.strip(), session_id=session_id)
+        
+        logger.info(f"RAG client returned: '{response[:100] if response else 'None'}...'")
+        
+        if response and response.strip():
+            return response
         else:
-            state["next_question"] = "I'm sorry, I don't have information about that. Could you please rephrase your question or ask about admissions, courses, campus facilities, or other university services?"
+            logger.warning("RAG returned empty response")
+            return "I'm sorry, I don't have information about that. Could you please rephrase your question?"
             
     except Exception as e:
+        logger.error(f"RAG query failed with exception: {e}")
         print(f"RAG query failed: {e}")
-        state["next_question"] = "I'm having trouble accessing the university information system right now. Please try again in a moment."
-    
-    # Add to history
-    if "history" not in state:
-        state["history"] = []
-    state["history"].append({"user": user_input, "assistant": state["next_question"]})
-    
-    # Stay in chat mode
-    state["current_node"] = "university_chat"
-    return state
-
-
-def goodbye(llm, state, user_input=None):
-    """Handle goodbye and end conversation"""
-    name = state.get("name", "there")
-    
-    goodbye_messages = [
-        f"Goodbye, {name}! Feel free to come back if you have more questions about our university.",
-        f"Thank you for visiting, {name}! Have a great day!",
-        f"See you later, {name}! Good luck with your university journey!",
-        f"Take care, {name}! I'm here whenever you need university information."
-    ]
-    
-    # Pick a goodbye message (you could make this random)
-    state["next_question"] = goodbye_messages[0]
-    state["conversation_ended"] = True
-    state["current_node"] = "goodbye"
-    
-    # Add to history
-    if "history" not in state:
-        state["history"] = []
-    state["history"].append({"assistant": state["next_question"]})
-    
-    # Clear RAG session context
-    try:
-        session_id = state.get("session_id")
-        if session_id:
-            rag_client.clear_session_context(session_id)
-    except Exception as e:
-        print(f"Failed to clear RAG context: {e}")
-    
-    return state
-
-
-# Minimal helper functions if needed
-def get_user_context(state):
-    """Get user context for personalized responses"""
-    return {
-        "name": state.get("name"),
-        "history_count": len(state.get("history", [])),
-        "session_id": state.get("session_id")
-    }
-
-
-def format_university_response(response, user_name=None):
-    """Format RAG responses in a friendly way"""
-    if not response:
-        return "I don't have information about that topic."
-    
-    # Add personal touch if name is available
-    if user_name and not response.startswith(user_name):
-        return f"{response}"
-    
-    return response
+        return "I'm having trouble accessing the university information system right now. Please try again in a moment."

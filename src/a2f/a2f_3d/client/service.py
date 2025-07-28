@@ -122,9 +122,14 @@ async def read_from_stream(stream):
             timestamp = datetime.now()
             dir_name = timestamp.strftime("%Y%m%d_%H%M%S_%f")
             os.makedirs(dir_name, exist_ok=False)
+            os.makedirs(dir_name, exist_ok=False)
             # End of File signals that the stream has been read completely.
             # Not the be confused with the Status Message that contains the response of the RPC call.
-            save_audio_data_to_file(dir_name, audio_header, audio_buffer)
+            
+            # Save the audio file with the name 'out.wav' as expected by the frontend.
+            with open(f"{dir_name}/out.wav", "wb") as f:
+                f.write(audio_buffer)
+            logger.info(f"Audio data saved to {dir_name}/out.wav")
 
             # Normalize the dictionnary data to output in JSON.
             df_animation = pandas.json_normalize(animation_key_frames)

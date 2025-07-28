@@ -1,6 +1,6 @@
-from typing_extensions import TypedDict
+from pydantic import BaseModel
+from typing import Optional
 
-
-class ChatModel(TypedDict):
-    session_id: str
-    user_input: str
+class ChatModel(BaseModel):
+    message: str
+    session_id: Optional[str] = None

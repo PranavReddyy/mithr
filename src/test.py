@@ -7,12 +7,11 @@ from typing import Optional
 BASE_URL = "http://127.0.0.1:8000"
 HEADERS = {'accept': 'application/json', 'Content-Type': 'application/json'}
 
-
 def test_health_check():
     """Test the health endpoint."""
     print("🏥 Testing health check...")
     try:
-        response = requests.get(f"{BASE_URL}/health/", headers=HEADERS)
+        response = requests.get(f"{BASE_URL}/health", headers=HEADERS)
         if response.status_code == 200:
             health_data = response.json()
             print(f"✅ Health check passed: {health_data}")
@@ -24,133 +23,85 @@ def test_health_check():
         print(f"❌ Health check error: {e}")
         return False
 
-
-def test_rag_endpoint():
-    """Test RAG endpoint connectivity."""
-    print("🤖 Testing RAG endpoint...")
+def test_rag_health():
+    """Test RAG health endpoint."""
+    print("🤖 Testing RAG health...")
     try:
-        test_query = {"query": "What are the university's admission requirements?"}
-        response = requests.post(f"{BASE_URL}/rag/test/", json=test_query, headers=HEADERS)
+        response = requests.get(f"{BASE_URL}/rag/health", headers=HEADERS)
         if response.status_code == 200:
             rag_data = response.json()
-            print(f"✅ RAG test passed: {rag_data['status']}")
-            print(f"📝 RAG response: {rag_data['response'][:100]}...")
+            print(f"✅ RAG health check passed: {rag_data}")
             return True
         else:
-            print(f"❌ RAG test failed: {response.status_code}")
+            print(f"❌ RAG health check failed: {response.status_code}")
             return False
     except Exception as e:
-        print(f"❌ RAG test error: {e}")
+        print(f"❌ RAG health check error: {e}")
         return False
 
-
-def initialize_session() -> Optional[str]:
-    """Initialize a new conversation session."""
-    print("🚀 Initializing university assistant session...")
+def test_a2f_status():
+    """Test A2F system status."""
+    print("🎬 Testing A2F status...")
     try:
-        response = requests.get(f"{BASE_URL}/session/", headers=HEADERS)
+        response = requests.get(f"{BASE_URL}/a2f/status", headers=HEADERS)
         if response.status_code == 200:
-            data = response.json()
-            session_id = data.get('session_id')
-            initial_question = data['state']['next_question']
-            print(f"✅ Session initialized: {session_id}")
-            print(f"🎓 University Assistant: {initial_question}")
-            return session_id
+            a2f_data = response.json()
+            print(f"✅ A2F status check passed: {a2f_data}")
+            return True
         else:
-            print(f"❌ Session initialization failed: {response.status_code}")
-            print(f"Error: {response.json()}")
-            return None
+            print(f"❌ A2F status check failed: {response.status_code}")
+            return False
     except Exception as e:
-        print(f"❌ Session initialization error: {e}")
-        return None
+        print(f"❌ A2F status check error: {e}")
+        return False
 
-
-def send_message(session_id: str, user_input: str) -> bool:
-    """Send a message to the university assistant."""
+def test_chat(message: str, session_id: str = None) -> dict:
+    """Test chat endpoint."""
+    print(f"💬 Testing chat with: '{message}'")
     try:
         payload = {
-            "session_id": session_id,
-            "user_input": user_input
+            "message": message,
+            "session_id": session_id or "test_session"
         }
-        response = requests.post(f"{BASE_URL}/chat/", json=payload, headers=HEADERS)
+        response = requests.post(f"{BASE_URL}/chat", json=payload, headers=HEADERS)
         
         if response.status_code == 200:
             data = response.json()
-            bot_response = data['state']['next_question']
-            current_node = data['state'].get('current_node', 'unknown')
-            conversation_ended = data['state'].get('conversation_ended', False)
-            
-            print(f"🎓 University Assistant: {bot_response}")
-            print(f"   [Node: {current_node}]")
-            
-            return not conversation_ended
+            print(f"✅ Chat response: {data['response'][:100]}...")
+            return data
         else:
-            error_detail = response.json().get('detail', 'Unknown error')
-            print(f"❌ Error: {error_detail}")
-            return False
-            
+            print(f"❌ Chat failed: {response.status_code}")
+            return None
     except Exception as e:
-        print(f"❌ Message sending error: {e}")
-        return False
-
-
-def end_session(session_id: str):
-    """End the conversation session."""
-    try:
-        response = requests.delete(f"{BASE_URL}/session/{session_id}", headers=HEADERS)
-        if response.status_code == 200:
-            print(f"✅ Session {session_id} ended successfully")
-        else:
-            print(f"❌ Failed to end session: {response.status_code}")
-    except Exception as e:
-        print(f"❌ Session ending error: {e}")
-
-
-def get_session_stats():
-    """Get session statistics."""
-    try:
-        response = requests.get(f"{BASE_URL}/sessions/stats/", headers=HEADERS)
-        if response.status_code == 200:
-            stats = response.json()
-            print(f"📊 Session Statistics:")
-            print(f"   Total sessions: {stats['total_sessions']}")
-            print(f"   Active sessions: {stats['active_sessions']}")
-            print(f"   Sessions by node: {stats['sessions_by_node']}")
-            print(f"   RAG system healthy: {stats['rag_system_healthy']}")
-        else:
-            print(f"❌ Failed to get stats: {response.status_code}")
-    except Exception as e:
-        print(f"❌ Stats error: {e}")
-
+        print(f"❌ Chat error: {e}")
+        return None
 
 def interactive_chat():
     """Run interactive chat with the university assistant."""
-    print("🎓 University Assistant Test Client")
+    print("🎓 University Assistant Simple Test Client")
     print("=" * 50)
     
     # Run health checks first
     if not test_health_check():
-        print("⚠️  Health check failed, but continuing...")
+        print("⚠️  Main health check failed, but continuing...")
     
-    if not test_rag_endpoint():
-        print("⚠️  RAG endpoint test failed, but continuing...")
+    if not test_rag_health():
+        print("⚠️  RAG health check failed, but continuing...")
     
-    # Initialize session
-    session_id = initialize_session()
-    if not session_id:
-        print("❌ Cannot start conversation without session")
-        return
+    if not test_a2f_status():
+        print("⚠️  A2F status check failed, but continuing...")
     
+    session_id = f"test_session_{hash(str(id))}"
+    
+    print(f"\n🎯 Session ID: {session_id}")
     print("\nCommands:")
     print("  - Type your questions normally")
     print("  - 'quit' or 'exit' to end conversation")
-    print("  - 'stats' to see session statistics")
-    print("  - 'help' to see this message again")
+    print("  - 'health' to run health checks")
+    print("  - 'sessions' to see session info")
     print("-" * 50)
     
-    conversation_active = True
-    
-    while conversation_active:
+    while True:
         try:
             user_input = input("\n💬 You: ").strip()
             
@@ -160,31 +111,35 @@ def interactive_chat():
             # Handle special commands
             if user_input.lower() in ['quit', 'exit']:
                 print("👋 Ending conversation...")
-                end_session(session_id)
                 break
                 
-            elif user_input.lower() == 'stats':
-                get_session_stats()
+            elif user_input.lower() == 'health':
+                test_health_check()
+                test_rag_health()
+                test_a2f_status()
                 continue
                 
-            elif user_input.lower() == 'help':
-                print("\nCommands:")
-                print("  - Type your questions normally")
-                print("  - 'quit' or 'exit' to end conversation")
-                print("  - 'stats' to see session statistics")
-                print("  - 'help' to see this message again")
+            elif user_input.lower() == 'sessions':
+                try:
+                    response = requests.get(f"{BASE_URL}/sessions", headers=HEADERS)
+                    if response.status_code == 200:
+                        sessions_data = response.json()
+                        print(f"📊 Sessions: {sessions_data}")
+                    else:
+                        print(f"❌ Failed to get sessions: {response.status_code}")
+                except Exception as e:
+                    print(f"❌ Sessions error: {e}")
                 continue
             
             # Send message to assistant
-            conversation_active = send_message(session_id, user_input)
-            
-            if not conversation_active:
-                print("🎓 Conversation ended by assistant")
-                end_session(session_id)
+            result = test_chat(user_input, session_id)
+            if result:
+                print(f"🎓 University Assistant: {result['response']}")
+            else:
+                print("❌ Failed to get response")
                 
         except KeyboardInterrupt:
             print("\n\n⌨️  Interrupted by user")
-            end_session(session_id)
             break
         except Exception as e:
             print(f"❌ Unexpected error: {e}")
@@ -192,42 +147,42 @@ def interactive_chat():
     
     print("👋 Goodbye!")
 
-
 def run_automated_test():
     """Run automated test sequence."""
     print("🧪 Running Automated Test Sequence")
     print("=" * 50)
     
-    # Test health
+    # Test all health endpoints
     test_health_check()
-    test_rag_endpoint()
+    test_rag_health()
+    test_a2f_status()
     
-    # Test conversation flow
-    session_id = initialize_session()
-    if not session_id:
-        return
-    
-    # Test name collection
-    print("\n🧪 Testing name collection...")
-    send_message(session_id, "John Doe")
-    
-    # Test university queries
+    # Test chat functionality
     test_queries = [
+        "Hello, what can you help me with?",
         "What are the admission requirements?",
         "Tell me about the computer science program",
         "What are the tuition fees?",
-        "goodbye"
+        "Thank you, goodbye"
     ]
+    
+    session_id = "automated_test_session"
     
     for query in test_queries:
         print(f"\n🧪 Testing query: {query}")
-        if not send_message(session_id, query):
+        result = test_chat(query, session_id)
+        if not result:
+            print("❌ Test failed, stopping")
             break
     
-    # Get final stats
-    print("\n📊 Final Statistics:")
-    get_session_stats()
-
+    # Test sessions endpoint
+    try:
+        response = requests.get(f"{BASE_URL}/sessions", headers=HEADERS)
+        if response.status_code == 200:
+            sessions_data = response.json()
+            print(f"\n📊 Final Sessions: {sessions_data}")
+    except Exception as e:
+        print(f"❌ Sessions check error: {e}")
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--auto":

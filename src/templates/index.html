@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claire</title>
+    <style>
+        :root {
+            --background-color: #0a0a0a;
+            --container-bg: #121212;
+            --user-bubble: #2a2a2a;
+            --bot-bubble: #003366;
+            --text-color: #e0e0e0;
+            --border-color: #333;
+            --avatar-bg: radial-gradient(circle at 50% 30%, #444, #111);
+            --accent-color: #007aff;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .main-container {
+            display: flex;
+            width: 100%;
+            max-width: 900px;
+            height: 90vh;
+            background-color: var(--container-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        .avatar-section {
+            width: 350px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 30px;
+            border-right: 1px solid var(--border-color);
+        }
+
+        .avatar-container {
+            width: 250px;
+            height: 250px;
+            border-radius: 50%;
+            background: var(--avatar-bg);
+            border: 2px solid #555;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #avatarCanvas {
+            width: 100%;
+            height: 100%;
+            transition: transform 0.1s ease-out;
+        }
+
+        .avatar-info {
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        .avatar-info h2 {
+            font-weight: 500;
+            color: #fff;
+        }
+
+        .avatar-info p {
+            font-size: 0.9em;
+            color: #888;
+        }
+
+        .chat-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column-reverse;
+        }
+
+        .message-pair {
+            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message {
+            max-width: 85%;
+            padding: 12px 18px;
+            border-radius: 18px;
+            line-height: 1.5;
+            word-wrap: break-word;
+        }
+
+        .user-message {
+            background-color: var(--user-bubble);
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+        }
+
+        .bot-message {
+            background-color: var(--bot-bubble);
+            color: #fff;
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+            margin-top: 8px;
+        }
+
+        .chat-input-container {
+            padding: 20px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .chat-input-form {
+            display: flex;
+        }
+
+        .chat-input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            font-size: 1em;
+            background-color: #222;
+            color: var(--text-color);
+            outline: none;
+        }
+
+        .chat-input:focus {
+            border-color: var(--accent-color);
+        }
+
+        .thinking-indicator {
+            position: absolute;
+            bottom: 80px;
+            /* Adjust as needed */
+            left: 20px;
+            display: none;
+            /* Hidden by default */
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background-color: rgba(0, 0, 0, 0.3);
+            border-radius: 16px;
+            font-size: 0.9em;
+            color: #aaa;
+        }
+
+        .typing-dots {
+            display: flex;
+            gap: 4px;
+        }
+
+        .typing-dots span {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background-color: var(--accent-color);
+            animation: typing 1.4s infinite ease-in-out;
+        }
+
+        .typing-dots span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-dots span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+
+            0%,
+            80%,
+            100% {
+                transform: scale(0.8);
+                opacity: 0.5;
+            }
+
+            40% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="main-container">
+        <div class="avatar-section">
+            <div class="avatar-container">
+                <canvas id="avatarCanvas"></canvas>
+            </div>
+            <div class="avatar-info">
+                <h2>Claire</h2>
+                <p>AI Assistant</p>
+            </div>
+        </div>
+        <div class="chat-section">
+            <div class="chat-messages" id="chatMessages">
+                <!-- Messages will be added here -->
+            </div>
+            <div class="thinking-indicator" id="thinkingIndicator">
+                <div class="typing-dots">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+                <span>Claire is thinking...</span>
+            </div>
+            <div class="chat-input-container">
+                <form id="chatForm">
+                    <input type="text" class="chat-input" id="messageInput" placeholder="Ask something...">
+                </form>
+            </div>
+        </div>
+    </div>
+    <audio id="animationAudio" style="display: none;"></audio>
+
+    <script>
+        class ClaireAssistant {
+            constructor() {
+                this.sessionId = 'session_' + Math.random().toString(36).substr(2, 9);
+                this.baseUrl = 'http://127.0.0.1:8000';
+                this.isAnimating = false;
+                this.animationFrameId = null;
+
+                this.dom = {
+                    form: document.getElementById('chatForm'),
+                    input: document.getElementById('messageInput'),
+                    messages: document.getElementById('chatMessages'),
+                    avatar: document.getElementById('avatarCanvas'), // Changed to canvas
+                    audioPlayer: document.getElementById('animationAudio'),
+                    thinkingIndicator: document.getElementById('thinkingIndicator'),
+                };
+
+                // This is where you would initialize your 3D scene (e.g., with Three.js)
+                // For now, we'll just draw a simple placeholder.
+                this.setupCanvasPlaceholder();
+                this.setupEventListeners();
+                this.addBotMessage("Hello! How can I help you today?");
+            }
+
+            setupCanvasPlaceholder() {
+                const canvas = this.dom.avatar;
+                const ctx = canvas.getContext('2d');
+                canvas.width = canvas.offsetWidth;
+                canvas.height = canvas.offsetHeight;
+
+                ctx.fillStyle = '#222';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#555';
+                ctx.font = '16px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('3D Model Placeholder', canvas.width / 2, canvas.height / 2);
+            }
+
+            setupEventListeners() {
+                this.dom.form.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    const message = this.dom.input.value.trim();
+                    if (message) {
+                        this.sendMessage(message);
+                        this.dom.input.value = '';
+                    }
+                });
+            }
+
+            showThinking(show) {
+                this.dom.thinkingIndicator.style.display = show ? 'flex' : 'none';
+            }
+
+            async sendMessage(message) {
+                this.addUserMessage(message);
+                this.dom.input.disabled = true;
+                this.showThinking(true);
+
+                try {
+                    // 1. Get response from RAG
+                    const chatResponse = await fetch(`${this.baseUrl}/chat`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ message: message, session_id: this.sessionId })
+                    });
+                    if (!chatResponse.ok) throw new Error('Failed to get chat response');
+                    const chatData = await chatResponse.json();
+                    const botResponseText = chatData.response;
+
+                    // 2. Get web animation data (includes audio)
+                    const animResponse = await fetch(`${this.baseUrl}/a2f/web-animation`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: botResponseText })
+                    });
+                    if (!animResponse.ok) throw new Error('Failed to get animation data');
+                    const animationData = await animResponse.json();
+
+                    // 3. Add bot message to UI and play animation
+                    this.addBotMessage(botResponseText);
+                    this.playAnimation(animationData);
+
+                } catch (error) {
+                    console.error('Error in chat flow:', error);
+                    this.addBotMessage("Sorry, I encountered an error. Please try again.");
+                } finally {
+                    this.dom.input.disabled = false;
+                    this.dom.input.focus();
+                    this.showThinking(false);
+                }
+            }
+
+            addUserMessage(text) {
+                const pair = document.createElement('div');
+                pair.className = 'message-pair';
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message user-message';
+                messageDiv.textContent = text;
+                pair.appendChild(messageDiv);
+                this.dom.messages.prepend(pair);
+            }
+
+            addBotMessage(text) {
+                const lastPair = this.dom.messages.querySelector('.message-pair');
+                if (!lastPair || lastPair.querySelector('.bot-message')) {
+                    const newPair = document.createElement('div');
+                    newPair.className = 'message-pair';
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = 'message bot-message';
+                    messageDiv.textContent = text;
+                    newPair.appendChild(messageDiv);
+                    this.dom.messages.prepend(newPair);
+                } else {
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = 'message bot-message';
+                    messageDiv.textContent = text;
+                    lastPair.appendChild(messageDiv);
+                }
+            }
+
+            playAnimation(animationData) {
+                if (this.isAnimating) {
+                    cancelAnimationFrame(this.animationFrameId);
+                    this.dom.audioPlayer.pause();
+                }
+                this.isAnimating = true;
+
+                const audioBlob = new Blob([Uint8Array.from(atob(animationData.audio.base64), c => c.charCodeAt(0))], { type: 'audio/mpeg' });
+                const audioUrl = URL.createObjectURL(audioBlob);
+                this.dom.audioPlayer.src = audioUrl;
+
+                this.animateFace(animationData.animation.frames);
+                this.dom.audioPlayer.play().catch(e => console.error("Audio play failed:", e));
+
+                this.dom.audioPlayer.onended = () => {
+                    this.isAnimating = false;
+                    URL.revokeObjectURL(audioUrl);
+                    this.dom.avatar.style.transform = 'scale(1) rotateX(0deg) rotateY(0deg)';
+                };
+            }
+
+            animateFace(frames) {
+                let frameIndex = 0;
+                const frameRate = 30;
+                const startTime = performance.now();
+
+                const animate = (currentTime) => {
+                    const elapsedTime = currentTime - startTime;
+                    frameIndex = Math.floor(elapsedTime / (1000 / frameRate));
+
+                    if (frameIndex >= frames.length) {
+                        this.isAnimating = false;
+                        return;
+                    }
+
+                    const frame = frames[frameIndex];
+                    const controls = frame.face_controls;
+
+                    // This part is a mock. In a real 3D setup, you would pass these `controls`
+                    // to your 3D model's animation mixer or blend shape controller.
+                    // The CSS transform is kept to show the head movement on the canvas placeholder.
+                    const nod = controls.head_nod * 8;
+                    const turn = controls.head_turn * 12;
+                    this.dom.avatar.style.transform = `rotateX(${nod}deg) rotateY(${turn}deg)`;
+
+                    // Example of how you might update a 3D model:
+                    // if (this.my3DModel) {
+                    //     this.my3DModel.setBlendShape('mouthOpen', controls.mouth_open);
+                    //     this.my3DModel.setBlendShape('jawOpen', controls.jaw_open);
+                    //     // ... and so on for other controls
+                    // }
+
+                    this.animationFrameId = requestAnimationFrame(animate);
+                };
+
+                this.animationFrameId = requestAnimationFrame(animate);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            new ClaireAssistant();
+        });
+    </script>
+</body>
+
+</html>
