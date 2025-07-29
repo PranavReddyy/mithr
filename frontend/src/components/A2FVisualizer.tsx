@@ -50,7 +50,7 @@ function A2FModel({ emotionData, animationData, currentFrame, isPlaying, positio
 }) {
   const groupRef = useRef<THREE.Group>(null)
   const mixerRef = useRef<THREE.AnimationMixer | null>(null)
-  const { scene, animations } = useGLTF('/claire_with_tongue.glb')
+  const { scene, animations } = useGLTF('/claire2.glb')
   const blendshapeMap = useRef<{ [key: string]: number }>({});
 
   useEffect(() => {
@@ -209,7 +209,7 @@ export default function A2FChatAnimation() {
         if (isListeningRef.current) {
           stopListening();
         }
-      }, 2000); // 1500ms = 1.5s pause allowed
+      }, 1500); // 1500ms = 1.5s pause allowed
     };
 
     // Handle errors
@@ -278,6 +278,15 @@ export default function A2FChatAnimation() {
 
     setIsListening(false);
   }, [stopWebSpeechVAD]);
+
+  useEffect(() => {
+    if (audioUrl && audioRef.current) {
+      console.log("audioRef.current:", audioRef.current);
+      audioRef.current.play().catch((err) => {
+        console.warn("Audio playback blocked or failed:", err);
+      });
+    }
+  }, [audioUrl]);
 
   const handleTranscription = useCallback(async (audioBlob: Blob) => {
     setLoading(true);
@@ -451,6 +460,16 @@ export default function A2FChatAnimation() {
       const animationText = await zip.file('animation_frames.csv')?.async('string');
       const audioBlob = await zip.file('out.mp3')?.async('blob');
       if (!emotionText || !animationText || !audioBlob) throw new Error("Missing files in ZIP");
+
+      // Debug logs
+      console.log("Emotion CSV length:", emotionText?.length);
+      console.log("Animation CSV length:", animationText?.length);
+      console.log("Audio blob type:", audioBlob?.type);
+      console.log("Audio blob size:", audioBlob?.size);
+
+      const audioUrl = URL.createObjectURL(audioBlob);
+      console.log("Audio URL:", audioUrl);
+
       const emotionResult = Papa.parse(emotionText, { header: true, dynamicTyping: true });
       const animationResult = Papa.parse(animationText, { header: true, dynamicTyping: true });
       const processedEmotion: EmotionData[] = emotionResult.data.map((r: any, i: number) => ({ frame: i, time_code: r.time_code || 0, grief: r['emotion_values.grief'] || 0, joy: r['emotion_values.joy'] || 0, disgust: r['emotion_values.disgust'] || 0, outofbreath: r['emotion_values.outofbreath'] || 0, pain: r['emotion_values.pain'] || 0, anger: r['emotion_values.anger'] || 0, amazement: r['emotion_values.amazement'] || 0, cheekiness: r['emotion_values.cheekiness'] || 0, sadness: r['emotion_values.sadness'] || 0, fear: r['emotion_values.fear'] || 0 }));
@@ -462,7 +481,7 @@ export default function A2FChatAnimation() {
       setEmotionData(processedEmotion);
       setAnimationData(processedAnimation);
       setMaxFrames(Math.max(processedEmotion.length, processedAnimation.length));
-      setAudioUrl(URL.createObjectURL(audioBlob));
+      setAudioUrl(audioUrl);
       setIsPlaying(true);
     } catch (err) {
       console.error("Animation generation error:", err);
@@ -482,7 +501,7 @@ export default function A2FChatAnimation() {
     stopListening();
     addMessage('user', message);
     setUserInput('');
-    addMessage('thinking', 'Thinking...');
+    addMessage('thinking', 'Let me get back...');
     setLoading(true);
 
     try {
@@ -805,7 +824,12 @@ export default function A2FChatAnimation() {
 
       {/* Hidden audio player */}
       {audioUrl && (
-        <audio ref={audioRef} src={audioUrl} autoPlay
+        <audio
+          ref={audioRef}
+          src={audioUrl}
+          autoPlay
+          onPlay={() => console.log("Audio playback started")}
+          onPause={() => console.log("Audio playback paused")}
           onEnded={() => {
             console.log("Audio ended, resetting states and starting listening...");
             setIsPlaying(false);
@@ -817,6 +841,9 @@ export default function A2FChatAnimation() {
                 forceStartListening();
               }
             }, 1200);
+          }}
+          onError={(e) => {
+            console.error("Audio playback error", e);
           }}
         />
       )}
