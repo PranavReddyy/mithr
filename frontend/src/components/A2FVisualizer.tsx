@@ -121,6 +121,11 @@ export default function A2FChatAnimation() {
   const [loading, setLoading] = useState(false)
   const [isListening, setIsListening] = useState(false);
   const [isAwake, setIsAwake] = useState(false);
+  const [audioUnlocked, setAudioUnlocked] = useState(() => {
+    return sessionStorage.getItem('audioUnlocked') === 'true';
+  });
+
+
 
   // ==================== REFS ====================
   const initializedRef = useRef(false);
@@ -160,6 +165,11 @@ export default function A2FChatAnimation() {
   useEffect(() => { loadingRef.current = loading }, [loading]);
   useEffect(() => { isListeningRef.current = isListening }, [isListening]);
   useEffect(() => { isAwakeRef.current = isAwake }, [isAwake]);
+  useEffect(() => {
+    if (audioUnlocked) {
+      sessionStorage.setItem('audioUnlocked', 'true');
+    }
+  }, [audioUnlocked]);
 
   // ==================== UTILITY FUNCTIONS ====================
   const addMessage = useCallback((type: 'user' | 'bot' | 'thinking', text: string) => {
@@ -182,7 +192,7 @@ export default function A2FChatAnimation() {
 
   const resetInactivityTimer = useCallback(() => {
     if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
-    inactivityTimerRef.current = setTimeout(goToSleep, 30000);
+    inactivityTimerRef.current = setTimeout(goToSleep, 10000000);
   }, [goToSleep]);
 
   // ==================== WEB SPEECH API VAD (AUTO-STOP ONLY) ====================
@@ -280,16 +290,17 @@ export default function A2FChatAnimation() {
   }, [stopWebSpeechVAD]);
 
   useEffect(() => {
-    if (audioUrl && audioRef.current) {
-      console.log("audioRef.current:", audioRef.current);
+    if (audioUrl && audioRef.current && audioUnlocked) {
       audioRef.current.play().catch((err) => {
         console.warn("Audio playback blocked or failed:", err);
+        setAudioUnlocked(false); // Show overlay again
       });
     }
-  }, [audioUrl]);
+  }, [audioUrl, audioUnlocked]);
 
   const handleTranscription = useCallback(async (audioBlob: Blob) => {
     setLoading(true);
+    stopListening();
     addMessage('thinking', 'Processing...');
     const reader = new FileReader();
     reader.readAsDataURL(audioBlob);
@@ -458,7 +469,9 @@ export default function A2FChatAnimation() {
       const zip = await JSZip.loadAsync(blob);
       const emotionText = await zip.file('a2f_smoothed_emotion_output.csv')?.async('string');
       const animationText = await zip.file('animation_frames.csv')?.async('string');
-      const audioBlob = await zip.file('out.mp3')?.async('blob');
+      const rawAudioBlob = await zip.file('out.mp3')?.async('blob');
+      const audioBlob = rawAudioBlob ? new Blob([rawAudioBlob], { type: 'audio/mpeg' }) : null;
+      console.log("Audio blob type:", audioBlob?.type);
       if (!emotionText || !animationText || !audioBlob) throw new Error("Missing files in ZIP");
 
       // Debug logs
@@ -498,7 +511,7 @@ export default function A2FChatAnimation() {
     if (!message) return;
 
     console.log("Submitting message, stopping listening...");
-    stopListening();
+    stopListening(); // <-- Stop recording first
     addMessage('user', message);
     setUserInput('');
     addMessage('thinking', 'Let me get back...');
@@ -527,6 +540,17 @@ export default function A2FChatAnimation() {
   };
 
   // ==================== EFFECTS ====================
+
+  useEffect(() => {
+    if (audioUnlocked) return;
+    const unlock = () => setAudioUnlocked(true);
+    window.addEventListener('click', unlock, { once: true });
+    window.addEventListener('keydown', unlock, { once: true });
+    return () => {
+      window.removeEventListener('click', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+  }, [audioUnlocked]);
 
   // Initialize Web Speech VAD on mount
   useEffect(() => {
@@ -717,7 +741,7 @@ export default function A2FChatAnimation() {
               animationData={animationData}
               currentFrame={currentFrame}
               isPlaying={isPlaying}
-              position={[0, -1.17, 1.8]}
+              position={[0, -1.17, 1.6]}
               scale={0.8}
             />
           </Suspense>
@@ -780,8 +804,8 @@ export default function A2FChatAnimation() {
 
       {/* Chat UI */}
       {isAwake && (
-        <div className="absolute top-1/2 left-[45%] -translate-x-[calc(50%+150px)] -translate-y-1/2 z-10 h-[70vh] w-[400px] flex flex-col pointer-events-none">
-          <div className="flex-grow overflow-hidden relative" style={{ maskImage: 'linear-gradient(to bottom, transparent 0%, black 25%, black 75%, transparent 100%)' }}>
+        <div className="absolute top-1/2 left-[45%] -translate-x-[calc(50%+150px)] -translate-y-[calc(50%-300px)] z-10 h-[25vh] w-[450px] flex flex-col pointer-events-none">
+          <div className="flex-grow overflow-hidden relative" style={{ maskImage: 'linear-gradient(to bottom, transparent 0%, black 10%, black 90%, transparent 100%)' }}>
             <div className="h-full overflow-y-auto no-scrollbar p-4 flex flex-col justify-end">
               <AnimatePresence initial={false}>
                 {chatHistory.map((msg) => (
@@ -822,11 +846,22 @@ export default function A2FChatAnimation() {
         </div>
       )}
 
+      {!audioUnlocked && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center">
+          <button
+            className="px-8 py-4 bg-blue-600 rounded-lg text-xl font-semibold"
+            onClick={() => setAudioUnlocked(true)}
+          >
+            Click to enable sound
+          </button>
+        </div>
+      )}
+
       {/* Hidden audio player */}
-      {audioUrl && (
+      {audioUnlocked && audioUrl && (
         <audio
           ref={audioRef}
-          src={audioUrl}
+          src={audioUrl || ''}
           autoPlay
           onPlay={() => console.log("Audio playback started")}
           onPause={() => console.log("Audio playback paused")}
@@ -847,6 +882,12 @@ export default function A2FChatAnimation() {
           }}
         />
       )}
+      <audio
+        ref={audioRef}
+        src={audioUrl || ''}
+        autoPlay
+        controls
+      />
     </div>
   );
 }
