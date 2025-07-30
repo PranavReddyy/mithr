@@ -506,38 +506,65 @@ export default function A2FChatAnimation() {
 
   // ==================== CHAT FUNCTIONS ====================
   const handleSubmit = async (e: React.FormEvent | Event, messageOverride?: string) => {
-    e.preventDefault();
-    const message = messageOverride || userInput.trim();
-    if (!message) return;
+  e.preventDefault();
+  const message = messageOverride || userInput.trim();
+  if (!message) return;
 
-    console.log("Submitting message, stopping listening...");
-    stopListening(); // <-- Stop recording first
-    addMessage('user', message);
-    setUserInput('');
-    addMessage('thinking', 'Let me get back...');
-    setLoading(true);
+  console.log("Submitting message, stopping listening...");
+  stopListening(); // <-- Stop recording first
+  addMessage('user', message);
+  setUserInput('');
+  addMessage('thinking', 'Let me get back...');
+  setLoading(true);
 
-    try {
-      const res = await fetch(`${apiBaseUrl}/chat`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message })
-      });
-      removeThinkingMessage();
-      if (!res.ok) throw new Error(`Chat API failed: ${res.status} ${await res.text()}`);
-      const data = await res.json();
-      const botResponse = data?.response;
-      if (typeof botResponse !== 'string') throw new Error("Invalid response format from chat API");
-      addMessage('bot', botResponse);
-      await handleGenerateAnimation(botResponse);
-    } catch (err) {
-      console.error("Chat submit error:", err);
-      removeThinkingMessage();
-      addMessage('bot', "Sorry, I encountered an error.");
-      setLoading(false);
-      if (isAwakeRef.current) {
-        setTimeout(() => forceStartListening(), 1000);
-      }
+  try {
+    // --- UPDATE: Use rag_client API and handle sleep logic ---
+    const sessionId = window.sessionStorage.getItem('rag_session_id') || undefined;
+    const res = await fetch(`${apiBaseUrl}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_input: message, session_id: sessionId }),
+    });
+    removeThinkingMessage();
+    if (!res.ok) throw new Error(`Chat API failed: ${res.status} ${await res.text()}`);
+    const data = await res.json();
+
+    // Save session_id for continuity
+    if (data.session_id) window.sessionStorage.setItem('rag_session_id', data.session_id);
+
+    const botResponse = data?.ai_response;
+    const routerDecision = data?.router_decision;
+    const shouldSleep = !!data?.sleep;
+
+    if (typeof botResponse !== 'string') throw new Error("Invalid response format from chat API");
+    addMessage('bot', botResponse);
+
+    // Animate last response
+    await handleGenerateAnimation(botResponse);
+
+    // --- If router_decision is goodbye, go to sleep after animation ---
+    if (shouldSleep) {
+      setTimeout(() => {
+        stopListening();
+        setIsAwake(false);
+        setIsPlaying(false);
+        setChatHistory([]);
+        initializedRef.current = false;
+        if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
+      }, 1200); // Wait for animation/audio to finish
+      return;
     }
-  };
+
+  } catch (err) {
+    console.error("Chat submit error:", err);
+    removeThinkingMessage();
+    addMessage('bot', "Sorry, I encountered an error.");
+    setLoading(false);
+    if (isAwakeRef.current) {
+      setTimeout(() => forceStartListening(), 1000);
+    }
+  }
+};
 
   // ==================== EFFECTS ====================
 
@@ -725,6 +752,28 @@ export default function A2FChatAnimation() {
     }
   }, [isPlaying]);
 
+  useEffect(() => {
+  let autoSleepTimer: NodeJS.Timeout | null = null;
+
+  if (isListening && isAwake) {
+    // Start a 15s timer when listening begins
+    autoSleepTimer = setTimeout(() => {
+      console.log("⏰ No speech detected for 15s, going to sleep...");
+      setIsAwake(false);
+      stopListening();
+      setIsPlaying(false);
+      setChatHistory([]);
+      initializedRef.current = false;
+      if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
+    }, 15000);
+  }
+
+  // Clear timer if listening stops or component unmounts
+  return () => {
+    if (autoSleepTimer) clearTimeout(autoSleepTimer);
+  };
+}, [isListening, isAwake, stopListening]);
+
   // ==================== RENDER ====================
   const hasThinkingMessage = chatHistory.some(msg => msg.type === 'thinking');
 
@@ -751,17 +800,35 @@ export default function A2FChatAnimation() {
 
       {/* Status Indicator */}
       <div className="absolute top-1/2 right-[calc(50%-220px)] -translate-y-1/2 z-20">
-        <div className="w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm border border-white/20 flex items-center justify-center">
-          {isListening ? (
-            <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_2px_rgba(239,68,68,0.7)]"></div>
-          ) : hasThinkingMessage ? (
-            <div className="w-3 h-3 rounded-full bg-orange-500 animate-pulse shadow-[0_0_8px_2px_rgba(249,115,22,0.7)]"></div>
-          ) : null}
+  <div
+    className="w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm border border-white/20 flex items-center justify-center relative cursor-pointer"
+    onClick={() => {
+      if (!audioUnlocked) setAudioUnlocked(true);
+    }}
+    title={!audioUnlocked ? "Click to enable sound" : undefined}
+  >
+    {isListening ? (
+      <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_2px_rgba(239,68,68,0.7)]"></div>
+    ) : hasThinkingMessage ? (
+      <div className="w-3 h-3 rounded-full bg-orange-500 animate-pulse shadow-[0_0_8px_2px_rgba(249,115,22,0.7)]"></div>
+    ) : !audioUnlocked ? (
+      <div className="w-3 h-3 rounded-full bg-white shadow-[0_0_8px_2px_rgba(255,255,255,0.7)]"></div>
+    ) : !isAwake ? (
+      <>
+        <div className="w-3 h-3 rounded-full bg-green-500 shadow-[0_0_8px_2px_rgba(34,197,94,0.7)]"></div>
+        <div className="absolute left-10 top-1/2 -translate-y-1/2 bg-black/80 px-4 py-2 rounded-xl text-green-300 text-sm font-semibold shadow-lg">
+          Sleeping. Say "Wake Up" or <button
+            onClick={() => setIsAwake(true)}
+            className="underline text-green-400 hover:text-green-300 transition"
+          >click here</button>
         </div>
-      </div>
+      </>
+    ) : null}
+  </div>
+</div>
 
       {/* Sleep overlay */}
-      {!isAwake && (
+      {/* {!isAwake && (
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/70 backdrop-blur-md">
           <h1 className="text-4xl font-bold mb-4">💤 Sleeping</h1>
           <p className="text-lg text-gray-300 mb-8">
@@ -800,7 +867,7 @@ export default function A2FChatAnimation() {
             </div>
           )}
         </div>
-      )}
+      )} */}
 
       {/* Chat UI */}
       {isAwake && (
@@ -843,17 +910,6 @@ export default function A2FChatAnimation() {
               {loading ? '🤔' : 'Send'}
             </button>
           </form>
-        </div>
-      )}
-
-      {!audioUnlocked && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center">
-          <button
-            className="px-8 py-4 bg-blue-600 rounded-lg text-xl font-semibold"
-            onClick={() => setAudioUnlocked(true)}
-          >
-            Click to enable sound
-          </button>
         </div>
       )}
 
